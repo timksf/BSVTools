@@ -47,11 +47,14 @@ close_project -delete
 puts "VIVADO FINISHED SUCCESSFULLY"
 """
 
-def copyBSVVerilog(src, dest):
+def copyBSVVerilog(src, dest, exclude="", includevivado=True):
     for filename in glob.glob(os.path.join(src, 'Verilog', '*.v')):
-        addLicenseHeader(shutil.copy(filename, dest))
-    for filename in glob.glob(os.path.join(src, 'Verilog.Vivado', '*.v')):
-        addLicenseHeader(shutil.copy(filename, dest))
+        if not os.path.basename(filename) in exclude:
+            addLicenseHeader(shutil.copy(filename, dest))
+    if includevivado:
+        for filename in glob.glob(os.path.join(src, 'Verilog.Vivado', '*.v')):
+            if not os.path.basename(filename) in exclude:
+                addLicenseHeader(shutil.copy(filename, dest))
 
 
 def addLicenseHeader(file):
@@ -229,7 +232,118 @@ def mkVivado(cli):
     used = used_fullpath + usedNGC
     removeUnused(used, srcpath)
 
-commands = {'mkVivado':mkVivado}
+
+def mkYosys(cli):
+
+    valid_synth_targets = "ecp5 ice40"
+    # map from synth target to pin constraint arg for nextpnr
+    constraintsids = { "ecp5": "lpf", "ice40": "pcf"}
+    pnr_outfiles = { "ecp5" : ("textcfg", "txt"), "ice40": ("asc", "asc") }
+    if not cli.synth_target:
+        print(f"Must provide synth target for yosys (no generic synthesis supported yet)")
+        return
+    elif cli.synth_target not in valid_synth_targets:
+        print(f"Synth target has to be one of: {valid_synth_targets}")
+        return  
+        
+    synthtarget = cli.synth_target
+    constraintsid = constraintsids[synthtarget]
+    synthpath = os.path.join(os.getcwd(), "synth", cli.projectname)
+    srcpath = os.path.join(synthpath, "src")
+    reportspath = os.path.join(synthpath, "reports")
+
+    # constraints command interpreted as pin constraint file
+    if len(cli.constraints) != 1:
+        print(f"Provide one pin constraint file for synthesis")
+        return
+
+    constraints = cli.constraints[0]
+    constraints_file = os.path.join(cli.base_dir, constraints)
+    if constraints != "" and not os.path.isfile(constraints_file):
+        print(f"Cannot find constraints file {constraints_file}")
+        return
+  
+    # create output directory
+    if not os.path.exists(srcpath):
+        os.makedirs(srcpath)
+    else:
+        print(f"{srcpath} already exists")
+        return
+
+    # add explicitly passed verilog files or if directory passed, all verilog files in dir
+    includefiles = []
+    for path in cli.includes:
+        if path.endswith('.v'):
+            includefiles.append(path)
+        else:
+            for filename in glob.glob(os.path.join(path, '*.v')):
+                includefiles.append(filename)
+
+    # copy over relevant verilog files
+    copyVerilog(cli.verilog_dir, srcpath, cli.exclude)
+    # copy explicitly passed verilog files from some include directory
+    if cli.includes:
+        copyVerilog(cli.includes, srcpath, cli.exclude)
+
+    # yosys does not work with these files (issue #2613)
+    # main.v is not needed for synthesis
+    yosys_excludes = """
+        InoutConnect.v
+        ProbeHook.v
+        ConstrainedRandom.v
+        BRAM1BELoad.v BRAM1Load.v
+        BRAM2BELoad.v BRAM2Load.v
+        RegFileLoad.v
+        main.v
+    """
+    print(f"Not including following sources due to incompatibility with yosys: {yosys_excludes}")
+    copyBSVVerilog(cli.bluespec_dir, srcpath, yosys_excludes, False)
+
+    if not os.path.exists(reportspath):
+        os.makedirs(reportspath)
+
+    yosys_cmd = f"yosys -q -p \"read_verilog {srcpath}/*.v; "
+    if cli.synth:
+        yosys_cmd += f"tee -o {reportspath}/synthesis.log "
+        yosys_cmd += f"synth_{synthtarget} -top {cli.topModule} -json {cli.projectname}.json"
+        yosys_cmd += "\""
+    else:
+        print(f"yosys custom commands: {cli.yosys_commands}")
+        yosys_cmd += f"{cli.yosys_commands}"
+        yosys_cmd += "\""
+
+    print("Starting yosys...\n")
+    print("YOSYS_CMD:" + yosys_cmd)
+    p = subprocess.Popen(yosys_cmd, shell=True, stdout=subprocess.PIPE).stdout.read()
+    res = p.decode()
+    print("\n Yosys finished")
+    print("-------------------------------------------------------------------------------------")
+
+    if cli.synth:
+        pnr_cmd = f"nextpnr-{synthtarget} "
+        pnr_cmd += f"--{constraintsid} {constraints_file} "
+        pnr_cmd += f"--json {cli.projectname}.json "
+        pnr_cmd += f"--{pnr_outfiles[synthtarget][0]} {cli.projectname}_synth.{pnr_outfiles[synthtarget][1]} "
+        pnr_cmd += f"--report {reportspath}/pnr.json "
+        pnr_cmd += f"--log {reportspath}/pnr_cli.log "
+        # add additional user pnr args
+        pnr_cmd += f"{cli.pnr_options} " 
+
+        print("Starting Place and Route...\n")
+        print("PNR cmd: " + pnr_cmd)
+        p = subprocess.Popen(pnr_cmd, shell=True, stderr=subprocess.PIPE).stderr.read() # nextpnr writes info to stderr??
+        s = p.decode()
+        success = re.search(r"Program finished normally", s)
+        # print some basic stats 
+        if success:
+            print([maxf for maxf in s.split('\n') if "Max frequency" in maxf][-1])
+
+        success_report = "successfully" if success else "with errors"
+        print(f"\nPlace and Route finished {success_report}")
+
+    print(f"Wrote reports to {reportspath}")
+
+commands = {'mkVivado': mkVivado, 'mkYosys': mkYosys}
 
 def find_bluespec():
     pattern = "Bluespec directory: (.*)"
@@ -256,6 +370,12 @@ def main():
     parser.add_argument('--additional', nargs='+', default="", type=str)
     parser.add_argument('--includes', nargs='+', default="", type=str)
     parser.add_argument('--constraints', nargs='+', default="", type=str)
+
+    # options exclusive to mkYosys command
+    parser.add_argument('--synth', action='store_true')
+    parser.add_argument('--yosys_commands', default="", type=str)
+    parser.add_argument('--synth_target', default="", type=str)
+    parser.add_argument('--pnr_options', default="", type=str)
 
     cli = parser.parse_args()
 

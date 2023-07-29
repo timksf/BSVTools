@@ -86,6 +86,16 @@ CXX_NO_OPT := 1
 # Add custom constraint files, Syntax: Filename,Load Order
 # CONSTRAINT_FILES += "$(PWD)/constraints/custom.xdc,LATE"
 
+VERILOG_SIM:=iverilog
+
+DO_SYNTH:=1
+
+SYNTH_TARGET:=
+
+PNR_OPTIONS:=
+
+YOSYS_CUSTOM_COMMANDS:=
+
 # Do not change: Load libraries such as BlueAXI or BlueLib
 ifneq ("$(wildcard $(PWD)/libraries/*/*.mk)", "")
 include $(PWD)/libraries/*/*.mk

@@ -60,8 +60,8 @@ endif
 
 ifeq ($(SIM_TYPE), VERILOG)
 VERILOGDIR=verilog
-BASEPARAMS=-verilog -vdir $(BUILDDIR)/$(VERILOGDIR) -vsim modelsim
-BASEPARAMS_SIM=-verilog -vdir $(VERILOGDIR) -vsim modelsim
+BASEPARAMS=-verilog -vdir $(BUILDDIR)/$(VERILOGDIR) -vsim $(VERILOG_SIM)
+BASEPARAMS_SIM=-verilog -vdir $(VERILOGDIR) -vsim $(VERILOG_SIM)
 COMPILE_FLAGS=-fdir $(PWD) -simdir $(BUILDDIR) -bdir $(BUILDDIR) -info-dir $(BUILDDIR) -p $(LIBRARIES)
 COMPLETE_FLAGS=$(BASEPARAMS) $(COMPILE_FLAGS)
 USED_DIRECTORIES += $(BUILDDIR)/$(VERILOGDIR)
@@ -96,6 +96,38 @@ endif
 
 compile_top: $(BUILDDIR)/bsc_defines | directories
 	$(SILENTCMD)$(BSV) -elab -verilog $(COMPLETE_FLAGS) $(BSC_FLAGS) -g $(TOP_MODULE) -u $(SRCDIR)/$(MAIN_MODULE).bsv
+
+ifdef SYNTH_TARGET
+SYNTH_TARGET := --synth_target $(SYNTH_TARGET)
+endif
+
+ifdef PNR_OPTIONS
+PNR_OPTIONS := --pnr_options "$(PNR_OPTIONS)"
+endif
+
+ifdef DO_SYNTH
+DO_SYNTH=--synth
+endif
+
+ifdef YOSYS_CUSTOM_COMMANDS
+YOSYS_CUSTOM_COMMANDS:=--yosys_commands "$(YOSYS_CUSTOM_COMMANDS)"
+endif
+
+$(info $(YOSYS_CUSTOM_COMMANDS))
+
+yosys_clean: 
+	$(RM) -rf $(BUILDDIR)/synth/$(PROJECT_NAME)
+
+yosys: compile_top yosys_clean
+	$(SILENTCMD)cd $(BUILDDIR); $(BSV_TOOLS_PY) $(PWD) \
+		mkYosys $(PROJECT_NAME) \
+				$(TOP_MODULE) \
+				--verilog_dir $(VERILOGDIR) \
+				$(CONSTRAINT_FILES) \
+				$(SYNTH_TARGET) \
+				$(PNR_OPTIONS) \
+				$(DO_SYNTH) \
+				$(YOSYS_CUSTOM_COMMANDS)
 
 else
 BASEPARAMS=-sim
