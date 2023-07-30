@@ -233,115 +233,167 @@ def mkVivado(cli):
     removeUnused(used, srcpath)
 
 
-def mkYosys(cli):
+class mkYosys():
 
-    valid_synth_targets = "ecp5 ice40"
+    valid_synth_targets = ["ecp5", "ice40"]
     # map from synth target to pin constraint arg for nextpnr
     constraintsids = { "ecp5": "lpf", "ice40": "pcf"}
+    # map from synth target to nextpnr output option and file ending
     pnr_outfiles = { "ecp5" : ("textcfg", "txt"), "ice40": ("asc", "asc") }
-    if not cli.synth_target:
-        print(f"Must provide synth target for yosys (no generic synthesis supported yet)")
-        return
-    elif cli.synth_target not in valid_synth_targets:
-        print(f"Synth target has to be one of: {valid_synth_targets}")
-        return  
-        
-    synthtarget = cli.synth_target
-    constraintsid = constraintsids[synthtarget]
-    synthpath = os.path.join(os.getcwd(), "synth", cli.projectname)
-    srcpath = os.path.join(synthpath, "src")
-    reportspath = os.path.join(synthpath, "reports")
+    # map from synth target to bitstream packing command and file ending
+    bitstream_packing = { "ecp5" : ("ecppack", "bit"), "ice40": ("icepack", "bin")}
 
-    # constraints command interpreted as pin constraint file
-    if len(cli.constraints) != 1:
-        print(f"Provide one pin constraint file for synthesis")
-        return
+    valid_render_exts = ["pdf", "png"]
 
-    constraints = cli.constraints[0]
-    constraints_file = os.path.join(cli.base_dir, constraints)
-    if constraints != "" and not os.path.isfile(constraints_file):
-        print(f"Cannot find constraints file {constraints_file}")
-        return
-  
-    # create output directory
-    if not os.path.exists(srcpath):
-        os.makedirs(srcpath)
-    else:
-        print(f"{srcpath} already exists")
-        return
+    def __init__(self, cli):
 
-    # add explicitly passed verilog files or if directory passed, all verilog files in dir
-    includefiles = []
-    for path in cli.includes:
-        if path.endswith('.v'):
-            includefiles.append(path)
+        synth = False
+
+        if cli.synth_and_target != "":
+            if cli.synth_and_target not in mkYosys.valid_synth_targets:
+                print(f"Synth target has to be one of: {mkYosys.valid_synth_targets}")
+                return  
+            synth = True
+            
+        synthtarget = cli.synth_and_target
+        synthpath = os.path.join(os.getcwd(), "synth", cli.projectname)
+        srcpath = os.path.join(synthpath, "src")
+        reportspath = os.path.join(synthpath, "reports")
+
+        # constraints command interpreted as pin constraint file
+        if len(cli.constraints) != 1:
+            print(f"Provide one pin constraint file for synthesis")
+            return
+
+        if synth: # constraint files only matter when synthesis is enabled
+            constraintsid = mkYosys.constraintsids[synthtarget]
+            constraints = cli.constraints[0]
+            constraints_file = os.path.join(cli.base_dir, constraints)
+            if constraints != "" and not os.path.isfile(constraints_file):
+                print(f"Cannot find constraints file {constraints_file}")
+                return
+    
+        # create output directory
+        if not os.path.exists(srcpath):
+            os.makedirs(srcpath)
         else:
-            for filename in glob.glob(os.path.join(path, '*.v')):
-                includefiles.append(filename)
+            print(f"{srcpath} already exists")
+            return
 
-    # copy over relevant verilog files
-    copyVerilog(cli.verilog_dir, srcpath, cli.exclude)
-    # copy explicitly passed verilog files from some include directory
-    if cli.includes:
-        copyVerilog(cli.includes, srcpath, cli.exclude)
+        # add explicitly passed verilog files or if directory passed, all verilog files in dir
+        includefiles = []
+        for path in cli.includes:
+            if path.endswith('.v'):
+                includefiles.append(path)
+            else:
+                for filename in glob.glob(os.path.join(path, '*.v')):
+                    includefiles.append(filename)
 
-    # yosys does not work with these files (issue #2613)
-    # main.v is not needed for synthesis
-    yosys_excludes = """
-        InoutConnect.v
-        ProbeHook.v
-        ConstrainedRandom.v
-        BRAM1BELoad.v BRAM1Load.v
-        BRAM2BELoad.v BRAM2Load.v
-        RegFileLoad.v
-        main.v
-    """
-    print(f"Not including following sources due to incompatibility with yosys: {yosys_excludes}")
-    copyBSVVerilog(cli.bluespec_dir, srcpath, yosys_excludes, False)
+        # copy over relevant verilog files
+        copyVerilog(cli.verilog_dir, srcpath, cli.exclude)
+        # copy explicitly passed verilog files from some include directory
+        if cli.includes:
+            copyVerilog(cli.includes, srcpath, cli.exclude)
 
-    if not os.path.exists(reportspath):
-        os.makedirs(reportspath)
+        # yosys does not work with these files (issue #2613)
+        # main.v is not needed for synthesis
+        yosys_excludes = """
+            InoutConnect.v
+            ProbeHook.v
+            ConstrainedRandom.v
+            BRAM1BELoad.v BRAM1Load.v
+            BRAM2BELoad.v BRAM2Load.v
+            RegFileLoad.v
+            main.v
+        """
+        print(f"Not including following sources due to incompatibility with yosys: {yosys_excludes}")
+        copyBSVVerilog(cli.bluespec_dir, srcpath, yosys_excludes, False)
 
-    yosys_cmd = f"yosys -q -p \"read_verilog {srcpath}/*.v; "
-    if cli.synth:
-        yosys_cmd += f"tee -o {reportspath}/synthesis.log "
-        yosys_cmd += f"synth_{synthtarget} -top {cli.topModule} -json {cli.projectname}.json"
-        yosys_cmd += "\""
-    else:
-        print(f"yosys custom commands: {cli.yosys_commands}")
-        yosys_cmd += f"{cli.yosys_commands}"
-        yosys_cmd += "\""
+        if not os.path.exists(reportspath):
+            os.makedirs(reportspath)
 
-    print("Starting yosys...\n")
-    print("YOSYS_CMD:" + yosys_cmd)
-    p = subprocess.Popen(yosys_cmd, shell=True, stdout=subprocess.PIPE).stdout.read()
-    res = p.decode()
-    print("\n Yosys finished")
-    print("-------------------------------------------------------------------------------------")
+        yosys_cmd = f"yosys -q -p \"read_verilog {srcpath}/*.v; "
+        if synth:
+            yosys_cmd += f"tee -o {reportspath}/synthesis.log "
+            yosys_cmd += f"synth_{synthtarget} -top {cli.topModule} -json {cli.projectname}.json"
+            yosys_cmd += "\""
+        else:
+            print(f"yosys custom commands: {cli.yosys_commands}")
+            yosys_cmd += f"{cli.yosys_commands}"
+            yosys_cmd += "\""
 
-    if cli.synth:
-        pnr_cmd = f"nextpnr-{synthtarget} "
-        pnr_cmd += f"--{constraintsid} {constraints_file} "
-        pnr_cmd += f"--json {cli.projectname}.json "
-        pnr_cmd += f"--{pnr_outfiles[synthtarget][0]} {cli.projectname}_synth.{pnr_outfiles[synthtarget][1]} "
-        pnr_cmd += f"--report {reportspath}/pnr.json "
-        pnr_cmd += f"--log {reportspath}/pnr_cli.log "
-        # add additional user pnr args
-        pnr_cmd += f"{cli.pnr_options} " 
+        print("Starting yosys...\n")
+        print("YOSYS_CMD:" + yosys_cmd)
+        p = subprocess.Popen(yosys_cmd, shell=True, stdout=subprocess.PIPE).stdout.read()
+        res = p.decode()
+        print("\nYosys finished")
+        print("-------------------------------------------------------------------------------------")
 
-        print("Starting Place and Route...\n")
-        print("PNR cmd: " + pnr_cmd)
-        p = subprocess.Popen(pnr_cmd, shell=True, stderr=subprocess.PIPE).stderr.read() # nextpnr writes info to stderr??
-        s = p.decode()
-        success = re.search(r"Program finished normally", s)
-        # print some basic stats 
-        if success:
-            print([maxf for maxf in s.split('\n') if "Max frequency" in maxf][-1])
+        if synth:
+            pnr_cmd = f"nextpnr-{synthtarget} "
+            pnr_cmd += f"--{constraintsid} {constraints_file} "
+            pnr_cmd += f"--json {cli.projectname}.json "
+            pnr_cmd += f"--{mkYosys.pnr_outfiles[synthtarget][0]} {cli.projectname}_synth.{mkYosys.pnr_outfiles[synthtarget][1]} "
+            pnr_cmd += f"--report {reportspath}/pnr.json "
+            pnr_cmd += f"--log {reportspath}/pnr_cli.log "
+            # add additional user pnr args
+            pnr_cmd += f"{cli.pnr_options} " 
 
-        success_report = "successfully" if success else "with errors"
-        print(f"\nPlace and Route finished {success_report}")
+            print("Starting Place and Route...\n")
+            # print("PNR cmd: " + pnr_cmd)
+            p = subprocess.Popen(pnr_cmd, shell=True, stderr=subprocess.PIPE).stderr.read() # nextpnr writes info to stderr??
+            s = p.decode()
+            success = re.search(r"Program finished normally", s)
+            # print some basic stats 
+            if success:
+                print([maxf for maxf in s.split('\n') if "Max frequency" in maxf][-1])
 
-    print(f"Wrote reports to {reportspath}")
+            success_report = "successfully" if success else "with errors"
+            print(f"\nPlace and Route finished {success_report}")
+
+            if success:
+                print("-------------------------------------------------------------------------------------")
+                print("Starting bitstream generation...\n")
+                bitstream_packer = mkYosys.bitstream_packing[synthtarget][0]
+                bitstream_fileending = mkYosys.bitstream_packing[synthtarget][1]
+                pack_cmd = f"{bitstream_packer} {cli.projectname}_synth.{mkYosys.pnr_outfiles[synthtarget][1]} {cli.projectname}.{bitstream_fileending}"
+                print(f"pack command: {pack_cmd}")
+                p = subprocess.Popen(pack_cmd, shell=True, stderr=subprocess.PIPE).stderr.read()
+                s = p.decode()
+                if s != "":
+                    print(s)
+                print(f"\nBitstream generation finished")
+            else: 
+                return
+            
+        if cli.render_netlist:
+            netlist_file = f"{cli.projectname}.json" # default netlist output as configured above
+            render_output = f"{cli.projectname}.svg"
+            if len(cli.render_netlist) == 2:
+                netlist_file = cli.render_netlist[-1]
+            elif len(cli.render_netlist) == 1:
+                render_output = cli.render_netlist[-1]
+            elif len(cli.render_netlist) != 0:
+                print(cli.render_netlist)
+                print(f"Only options for svg rendering: <out-file> <netlist-file>")
+                return
+            render_cmd = f"netlistsvg {netlist_file} -o {render_output}"
+            p = subprocess.Popen(render_cmd, shell=True, stdout=subprocess.PIPE).stdout.read()
+            s = p.decode()
+            if s != "":
+                print(s)  
+            success = not re.search(r"Error", s)
+            print(f"\nRendered netlist to svgfile" if success else " \nFailed to render netlist")
+
+            if success and cli.render_convert:
+                import cairosvg
+                if cli.render_convert == "pdf":
+                    cairosvg.svg2pdf(file_obj=open(render_output, "rb"), write_to=f"{cli.projectname}.pdf")
+                if cli.render_convert == "png":
+                    cairosvg.svg2png(url=render_output, write_to=f"{cli.projectname}.png")
+
+
+        print(f"Wrote reports to {reportspath}")
 
 commands = {'mkVivado': mkVivado, 'mkYosys': mkYosys}
 
@@ -372,10 +424,12 @@ def main():
     parser.add_argument('--constraints', nargs='+', default="", type=str)
 
     # options exclusive to mkYosys command
-    parser.add_argument('--synth', action='store_true')
-    parser.add_argument('--yosys_commands', default="", type=str)
-    parser.add_argument('--synth_target', default="", type=str)
-    parser.add_argument('--pnr_options', default="", type=str)
+    yosys_group = parser.add_argument_group("mkYosys", description="Since yosys encompassed a lot of features, here are some dedicated args to customize the flow. See the examples on how to use this command.")
+    yosys_group.add_argument('--synth_and_target', help="Add this to enable synthesis with specified target", default="", choices=mkYosys.valid_synth_targets, type=str)
+    yosys_group.add_argument('--pnr_options', help="Arguments to pass to nextpnr besides the default output/input file handling. This only takes effect if --synth_and_target is passed as well", default="", type=str)
+    yosys_group.add_argument('--yosys_commands', help="Use to run arbitrary yosys commands for the generated verilog. Only takes effect if --synth_and_target is not passed", default="", type=str)
+    yosys_group.add_argument('--render_netlist', help="The netlist produced by yosys can be rendered to svg by \"netlistsvg\". If the netlist is created by a command in --yosys_commands, the filename can be passed here.", nargs='*', default="", type=str)
+    yosys_group.add_argument('--render_convert', help="The generated svg can be converted for easier usability", default="", choices=mkYosys.valid_render_exts, type=str)
 
     cli = parser.parse_args()
 

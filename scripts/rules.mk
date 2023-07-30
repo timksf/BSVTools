@@ -98,24 +98,29 @@ compile_top: $(BUILDDIR)/bsc_defines | directories
 	$(SILENTCMD)$(BSV) -elab -verilog $(COMPLETE_FLAGS) $(BSC_FLAGS) -g $(TOP_MODULE) -u $(SRCDIR)/$(MAIN_MODULE).bsv
 
 ifdef SYNTH_TARGET
-SYNTH_TARGET := --synth_target $(SYNTH_TARGET)
+SYNTH_TARGET := --synth_and_target $(SYNTH_TARGET)
 endif
 
 ifdef PNR_OPTIONS
 PNR_OPTIONS := --pnr_options "$(PNR_OPTIONS)"
 endif
 
-ifdef DO_SYNTH
-DO_SYNTH=--synth
+ifdef YOSYS_CUSTOM_COMMANDS
+YOSYS_CUSTOM_COMMANDS:= --yosys_commands "$(YOSYS_CUSTOM_COMMANDS)"
 endif
 
-ifdef YOSYS_CUSTOM_COMMANDS
-YOSYS_CUSTOM_COMMANDS:=--yosys_commands "$(YOSYS_CUSTOM_COMMANDS)"
+ifdef RENDER_NETLIST
+RENDER_NETLIST:= --render_netlist $(RENDER_NETLIST)
+endif
+
+ifdef RENDER_CONVERT
+RENDER_CONVERT:= --render_convert $(RENDER_CONVERT)
 endif
 
 $(info $(YOSYS_CUSTOM_COMMANDS))
 
 yosys_clean: 
+	$(RM) -f $(BUILDDIR)/$(PROJECT_NAME)*
 	$(RM) -rf $(BUILDDIR)/synth/$(PROJECT_NAME)
 
 yosys: compile_top yosys_clean
@@ -127,7 +132,9 @@ yosys: compile_top yosys_clean
 				$(SYNTH_TARGET) \
 				$(PNR_OPTIONS) \
 				$(DO_SYNTH) \
-				$(YOSYS_CUSTOM_COMMANDS)
+				$(YOSYS_CUSTOM_COMMANDS) \
+				$(RENDER_NETLIST) \
+				$(RENDER_CONVERT)
 
 else
 BASEPARAMS=-sim
