@@ -176,9 +176,13 @@ sim: $(BUILDDIR)/$(OUTFILE)
 
 clean:
 	@echo "Cleaning working files"
+	$(SILENTCMD)$(RM) -f $(BUILDDIR)/*.cxx
+	$(SILENTCMD)$(RM) -f $(BUILDDIR)/*.h
+	$(SILENTCMD)$(RM) -f $(BUILDDIR)/*.sched
 	$(SILENTCMD)$(RM) -f $(BUILDDIR)/*.bo
 	$(SILENTCMD)$(RM) -f $(BUILDDIR)/*.ba
 	$(SILENTCMD)$(RM) -f $(BUILDDIR)/*.o
+	$(SILENTCMD)$(RM) -f $(BUILDDIR)/*.so
 	$(SILENTCMD)$(RM) -f $(BUILDDIR)/$(OUTFILE)
 
 # clean build files except libraries
