@@ -305,6 +305,7 @@ class mkYosys():
             BRAM2BELoad.v BRAM2Load.v
             RegFileLoad.v
             main.v
+            TriState.v
         """
         print(f"Not including following sources due to incompatibility with yosys: {yosys_excludes}")
         copyBSVVerilog(cli.bluespec_dir, srcpath, yosys_excludes, False)
@@ -312,10 +313,17 @@ class mkYosys():
         if not os.path.exists(reportspath):
             os.makedirs(reportspath)
 
+        #AAAAA
+        print(f"Fixing inout ports ({srcpath})")
+        p = subprocess.Popen(f"perl {cli.base_dir}/basicinout.pl {srcpath}/*.v ", shell=True, stdout=subprocess.PIPE).stdout.read()
+        res = p.decode()
+        #AAAAA
+
         yosys_cmd = f"yosys -q -p \"read_verilog {srcpath}/*.v; "
         if synth:
             yosys_cmd += f"tee -o {reportspath}/synthesis.log "
-            yosys_cmd += f"synth_{synthtarget} -top {cli.topModule} -json {cli.projectname}.json"
+            yosys_cmd += f"synth_{synthtarget} -top {cli.topModule} -json {cli.projectname}.json;"
+            # yosys_cmd += f"select -module {cli.topModule}; write_verilog synthd.v;"
             yosys_cmd += "\""
         else:
             print(f"yosys custom commands: {cli.yosys_commands}")
@@ -323,14 +331,15 @@ class mkYosys():
             yosys_cmd += "\""
 
         print("Starting yosys...\n")
-        print("YOSYS_CMD:" + yosys_cmd)
+        print("YOSYS_CMD: " + yosys_cmd)
         p = subprocess.Popen(yosys_cmd, shell=True, stdout=subprocess.PIPE).stdout.read()
         res = p.decode()
-        print("\nYosys finished")
+        print(f"\nYosys finished, see: {reportspath}" )
         print("-------------------------------------------------------------------------------------")
 
         if synth:
             pnr_cmd = f"nextpnr-{synthtarget} "
+            pnr_cmd += f"--lpf-allow-unconstrained "
             pnr_cmd += f"--{constraintsid} {constraints_file} "
             pnr_cmd += f"--json {cli.projectname}.json "
             pnr_cmd += f"--{mkYosys.pnr_outfiles[synthtarget][0]} {cli.projectname}_synth.{mkYosys.pnr_outfiles[synthtarget][1]} "
@@ -356,7 +365,7 @@ class mkYosys():
                 print("Starting bitstream generation...\n")
                 bitstream_packer = mkYosys.bitstream_packing[synthtarget][0]
                 bitstream_fileending = mkYosys.bitstream_packing[synthtarget][1]
-                pack_cmd = f"{bitstream_packer} {cli.projectname}_synth.{mkYosys.pnr_outfiles[synthtarget][1]} {cli.projectname}.{bitstream_fileending}"
+                pack_cmd = f"{bitstream_packer} --compress {cli.projectname}_synth.{mkYosys.pnr_outfiles[synthtarget][1]} {cli.projectname}.{bitstream_fileending}"
                 print(f"pack command: {pack_cmd}")
                 p = subprocess.Popen(pack_cmd, shell=True, stderr=subprocess.PIPE).stderr.read()
                 s = p.decode()

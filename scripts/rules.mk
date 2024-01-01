@@ -117,13 +117,20 @@ ifdef RENDER_CONVERT
 RENDER_CONVERT:= --render_convert $(RENDER_CONVERT)
 endif
 
+ifdef YOSYS_VERILOG_INCLUDES
+YOSYS_VERILOG_INCLUDES:= --includes $(YOSYS_VERILOG_INCLUDES)
+endif
+
 $(info $(YOSYS_CUSTOM_COMMANDS))
 
-yosys_clean: 
+verilog_clean:
+	$(RM) -rf $(BUILDDIR)/$(VERILOGDIR)
+
+yosys_clean:
 	$(RM) -f $(BUILDDIR)/$(PROJECT_NAME)*
 	$(RM) -rf $(BUILDDIR)/synth/$(PROJECT_NAME)
 
-yosys: compile_top yosys_clean
+yosys: compile_top yosys_clean clean
 	$(SILENTCMD)cd $(BUILDDIR); $(BSV_TOOLS_PY) $(PWD) \
 		mkYosys $(PROJECT_NAME) \
 				$(TOP_MODULE) \
@@ -134,7 +141,8 @@ yosys: compile_top yosys_clean
 				$(DO_SYNTH) \
 				$(YOSYS_CUSTOM_COMMANDS) \
 				$(RENDER_NETLIST) \
-				$(RENDER_CONVERT)
+				$(RENDER_CONVERT) \
+				$(YOSYS_VERILOG_INCLUDES)
 
 else
 BASEPARAMS=-sim
