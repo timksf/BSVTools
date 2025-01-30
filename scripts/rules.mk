@@ -14,9 +14,10 @@ else
 endif
 
 OUTFILE?=out
+PWD=$(CURDIR)
 SRCDIR?=$(PWD)/src
 BSV=bsc
-PWD?=$(shell pwd)
+
 BSV_TOOLS_PY:=$(BSV_TOOLS)/scripts/bsvTools.py
 BSV_DEPS:=$(BSV_TOOLS)/scripts/bsvDeps.py
 
@@ -79,6 +80,10 @@ ifdef CONSTRAINT_FILES
 CONSTRAINT_FILES := --constraints $(CONSTRAINT_FILES)
 endif
 
+ifdef INTERFACE_FILES
+INTERFACE_FILES := --interfaces $(INTERFACE_FILES)
+endif
+
 ifdef IGNORE_MODULES
 	EXCLUDED_VIVADO := --exclude  $(addsuffix .v, $(IGNORE_MODULES))
 endif
@@ -89,7 +94,7 @@ ip_clean:
 
 ip: compile_top ip_clean
 	@echo "Creating IP $(PROJECT_NAME)"
-	$(SILENTCMD)cd $(BUILDDIR); $(BSV_TOOLS_PY) . mkVivado $(PROJECT_NAME) $(TOP_MODULE) --verilog_dir $(VERILOGDIR) $(VERILOGDIR_EXTRAS) $(EXCLUDED_VIVADO) $(VIVADO_ADD_PARAMS) $(VIVADO_INCLUDES) $(CONSTRAINT_FILES)
+	$(SILENTCMD)cd $(BUILDDIR); $(BSV_TOOLS_PY) . mkVivado $(PROJECT_NAME) $(TOP_MODULE) --verilog_dir $(VERILOGDIR) $(VERILOGDIR_EXTRAS) $(EXCLUDED_VIVADO) $(VIVADO_ADD_PARAMS) $(VIVADO_INCLUDES) $(CONSTRAINT_FILES) $(INTERFACE_FILES)
 ifneq (, $(ZIP))
 	$(SILENTCMD)cd $(BUILDDIR)/ip && $(ZIP) -r $(PROJECT_NAME).zip $(PROJECT_NAME)
 endif
@@ -119,7 +124,7 @@ all: sim
 
 .PHONY: force
 $(BUILDDIR)/bsc_defines: force
-	@echo '$(BSC_FLAGS)' | cmp -s - $@ || (echo '$(BSC_FLAGS)' > $@ ; $(MAKE) clean_project)
+	@echo '$(shell echo $(BSC_FLAGS) | sed -r "s/'/'\\\''/g")' | cmp -s - $@ || (echo '$(shell echo $(BSC_FLAGS) | sed -r "s/'/'\\\''/g")' > $@ ; $(MAKE) clean_project)
 
 directories: $(USED_DIRECTORIES)
 

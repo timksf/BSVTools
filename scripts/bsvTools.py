@@ -8,6 +8,7 @@ import shutil
 import glob
 import subprocess
 import re
+import json
 from shutil import which
 
 vendor = "esa.informatik.tu-darmstadt.de"
@@ -139,7 +140,7 @@ def flattenVerilogIncludes(src, dst):
         dstFilename = dst + '/' + os.path.basename(src)
         with open(dstFilename, "w") as dst_file:
             for l in src_file:
-                m = re.search("^\s*`include \"(.*)\"", l)
+                m = re.search(r'^\s*`include \"(.*)\"', l)
                 if m:
                     dst_file.write("`include \"" + os.path.basename(m.group(1)) + "\"")
                 else:
@@ -174,6 +175,37 @@ def processConstraints(s, p):
             additional += "set_property PROCESSING_ORDER {} [get_files {}/{}]\n".format(ct, p, filename)
         additional += "ipx::merge_project_changes files [ipx::current_core]"
     return additional
+
+def processInterfaces(path):
+    ifcs = dict()
+    ifc_cmd = ""
+    # print(path)
+    with open(path) as ifcs_file:
+        ifcs = json.loads(ifcs_file.read())
+    if not ifcs:
+        print(f"No interface specification found at {path}")
+        return ifc_cmd
+    
+    for ifc in ifcs.keys():
+        ifc_name = ifc
+        #pins and type are mandatory
+        ifc_abstype = ifcs[ifc]["abstraction_type"]
+        ifc_bustype = ifcs[ifc]["bus_type"]
+        ifc_pins = ifcs[ifc]["pins"]
+        ifc_mode = ifcs[ifc].get("mode", None)
+        #create interface
+        ifc_cmd += f"ipx::add_bus_interface {ifc_name} [ipx::current_core]\n"
+        ifc_cmd += f"set_property abstraction_type_vlnv {ifc_abstype} [ipx::get_bus_interfaces {ifc_name} -of_objects [ipx::current_core]]\n"
+        ifc_cmd += f"set_property bus_type_vlnv {ifc_bustype} [ipx::get_bus_interfaces {ifc_name} -of_objects [ipx::current_core]]\n"
+        ifc_cmd += f"set_property display_name {ifc_name} [ipx::get_bus_interfaces {ifc_name} -of_objects [ipx::current_core]]\n"
+        if ifc_mode is not None:
+            ifc_cmd += f"set_property interface_mode {ifc_mode} [ipx::get_bus_interfaces {ifc_name} -of_objects [ipx::current_core]]\n"
+        for pin_map in ifc_pins:
+            pin_name, map_type = next(iter(pin_map.items()))
+            ifc_cmd += f"ipx::add_port_map {map_type} [ipx::get_bus_interfaces {ifc_name} -of_objects [ipx::current_core]]\n"
+            ifc_cmd += f"set_property physical_name {pin_name} [ipx::get_port_maps {map_type} -of_objects [ipx::get_bus_interfaces {ifc_name} -of_objects [ipx::current_core]]]\n"
+
+    return ifc_cmd
 
 
 def mkVivado(cli):
@@ -216,6 +248,8 @@ def mkVivado(cli):
 
     additional += processConstraints(constraints, constraintpath)
 
+    additional += processInterfaces(cli.interfaces)
+
     used = executeVivado(createNewProject, cli.vendor, cli.projectname, ippath, tmpdir, cli.topModule, additional, includes)
     used_fullpath = []
     usedNGC = []
@@ -256,6 +290,7 @@ def main():
     parser.add_argument('--additional', nargs='+', default="", type=str)
     parser.add_argument('--includes', nargs='+', default="", type=str)
     parser.add_argument('--constraints', nargs='+', default="", type=str)
+    parser.add_argument('--interfaces', default="", type=str)
 
     cli = parser.parse_args()
 
