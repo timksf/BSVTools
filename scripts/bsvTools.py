@@ -50,11 +50,11 @@ puts "VIVADO FINISHED SUCCESSFULLY"
 def copyBSVVerilog(src, dest, exclude="", includevivado=True):
     for filename in glob.glob(os.path.join(src, 'Verilog', '*.v')):
         if not os.path.basename(filename) in exclude:
-            addLicenseHeader(shutil.copy(filename, dest))
+            addLicenseHeader(shutil.copyfile(filename, os.path.join(dest, os.path.basename(filename))))
     if includevivado:
         for filename in glob.glob(os.path.join(src, 'Verilog.Vivado', '*.v')):
             if not os.path.basename(filename) in exclude:
-                addLicenseHeader(shutil.copy(filename, dest))
+                addLicenseHeader(shutil.copyfile(filename, os.path.join(dest, os.path.basename(filename))))
 
 
 def addLicenseHeader(file):
@@ -232,6 +232,80 @@ def mkVivado(cli):
     used = used_fullpath + usedNGC
     removeUnused(used, srcpath)
 
+class mkVivadoTCL():
+
+    create_project = """
+set project_dir {project_dir}
+set project_name {project_name}
+set src_path {src_path}
+# optional variables
+set script_path {{{script_path}}}
+set constr_path {{{constr_path}}}
+
+puts "Creating project $project_name at path $project_dir"
+create_project -part {part} -force $project_name $project_dir
+
+read_verilog [glob -directory $src_path *.v]
+
+if {{[file exists $constr_path]}} {{
+    read_xdc $constr_path
+}}
+puts "Script path: $script_path"
+if {{[file exists $script_path]}} {{
+    source $script_path
+}}
+
+close_project
+exit 0
+"""
+
+    def __init__(self, cli):
+        proj_path = os.path.join(os.getcwd(), cli.projectname)
+        src_path = os.path.join(proj_path, "src")
+
+        if not os.path.exists(src_path):
+            os.makedirs(src_path)
+
+        script_path = ""
+        if(os.path.exists(cli.script)):
+            script_path = cli.script
+
+        constraints_path = ""
+        constraints = cli.constraints[0] #TODO
+        if(os.path.exists(constraints)):
+            constraints_path = constraints
+
+        # add explicitly passed verilog files or if directory passed, all verilog files in dir
+        source_files = []
+        for path in cli.includes:
+            if path.endswith('.v'):
+                source_files.append(path)
+            else:
+                for filename in glob.glob(os.path.join(path, '*.v')):
+                    source_files.append(filename)
+
+        copyVerilog(cli.verilog_dir, src_path, cli.exclude)
+        if cli.includes:
+            copyVerilog(cli.includes, src_path, cli.exclude)
+        copyBSVVerilog(cli.bluespec_dir, src_path, "main.v")
+
+        if which("vivado") is None:
+            print("Could not find \"vivado\". Make sure Vivado is in the path.")
+            sys.exit(1)
+        with open('temp.tcl', "w+") as f:
+            f.write(self.create_project.format(
+                    project_dir=proj_path, 
+                    project_name=cli.projectname, 
+                    src_path=src_path, 
+                    part=cli.part, 
+                    constr_path=constraints_path,
+                    script_path=script_path
+                )
+            )
+        t = subprocess.Popen("vivado" + " -mode batch -source temp.tcl -nojournal -nolog", shell=True, stdout=subprocess.PIPE).stdout.read()
+        os.remove('temp.tcl')
+        s = t.decode()
+        print(s)
 
 class mkYosys():
 
@@ -404,7 +478,7 @@ class mkYosys():
 
         print(f"Wrote reports to {reportspath}")
 
-commands = {'mkVivado': mkVivado, 'mkYosys': mkYosys}
+commands = {'mkVivado': mkVivado, 'mkVivadoTCL': mkVivadoTCL, 'mkYosys': mkYosys}
 
 def find_bluespec():
     pattern = "Bluespec directory: (.*)"
@@ -424,13 +498,15 @@ def main():
     parser.add_argument('command', type=str, choices=commands.keys())
     parser.add_argument('projectname', type=str)
     parser.add_argument('topModule', type=str)
-    parser.add_argument('--verilog_dir', nargs='+', default="verilog", type=str)
-    parser.add_argument('--vendor', default=vendor, type=str)
-    parser.add_argument('--bluespec_dir', default=os.getenv('BLUESPECDIR', find_bluespec()), type=str)
-    parser.add_argument('--exclude', nargs='+', default="", type=str)
-    parser.add_argument('--additional', nargs='+', default="", type=str)
-    parser.add_argument('--includes', nargs='+', default="", type=str)
-    parser.add_argument('--constraints', nargs='+', default="", type=str)
+    
+    vivado_ip = parser.add_argument_group("mkVivado", description="Options for vivado IP generation customization")
+    vivado_ip.add_argument('--verilog_dir', nargs='+', default="verilog", type=str)
+    vivado_ip.add_argument('--vendor', default=vendor, type=str)
+    vivado_ip.add_argument('--bluespec_dir', default=os.getenv('BLUESPECDIR', find_bluespec()), type=str)
+    vivado_ip.add_argument('--exclude', nargs='+', default="", type=str)
+    vivado_ip.add_argument('--additional', nargs='+', default="", type=str)
+    vivado_ip.add_argument('--includes', nargs='+', default="", type=str)
+    vivado_ip.add_argument('--constraints', nargs='+', default="", type=str)
 
     # options exclusive to mkYosys command
     yosys_group = parser.add_argument_group("mkYosys", description="Since yosys encompassed a lot of features, here are some dedicated args to customize the flow. See the examples on how to use this command.")
@@ -439,6 +515,10 @@ def main():
     yosys_group.add_argument('--yosys_commands', help="Use to run arbitrary yosys commands for the generated verilog. Only takes effect if --synth_and_target is not passed", default="", type=str)
     yosys_group.add_argument('--render_netlist', help="The netlist produced by yosys can be rendered to svg by \"netlistsvg\". If the netlist is created by a command in --yosys_commands, the filename can be passed here.", nargs='*', default="", type=str)
     yosys_group.add_argument('--render_convert', help="The generated svg can be converted for easier usability", default="", choices=mkYosys.valid_render_exts, type=str)
+
+    vivado_tcl = parser.add_argument_group("mkVivadoTCL", description="")
+    vivado_tcl.add_argument('--part', help="Part number of synthesis target used for project creation", required=True, default="xcku3p-ffvb676-2-e", type=str)
+    vivado_tcl.add_argument('--script', help="Custom TCL script sourced from created project", default="", required=False, type=str)
 
     cli = parser.parse_args()
 

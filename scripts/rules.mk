@@ -146,6 +146,31 @@ yosys: compile_top yosys_clean clean
 				$(RENDER_CONVERT) \
 				$(YOSYS_VERILOG_INCLUDES)
 
+ifdef PART
+PART:= --part $(PART)
+endif 
+
+ifdef SCRIPT
+SCRIPT:= --script $(SCRIPT)
+endif
+
+ifdef CONSTRAINTS
+CONSTRAINTS:= --constraints $(CONSTRAINTS)
+endif
+
+vivado_tcl_clean:
+	$(RM) -rf $(BUILDDIR)/$(PROJECT_NAME)
+
+vivado_tcl: compile_top vivado_tcl_clean clean
+	$(SILENTCMD)cd $(BUILDDIR); $(BSV_TOOLS_PY) $(PWD) \
+	mkVivadoTCL $(PROJECT_NAME) \
+				$(TOP_MODULE) \
+				--verilog_dir $(VERILOGDIR) \
+				$(EXCLUDED_VIVADO) \
+				$(CONSTRAINTS) \
+				$(PART) \
+				$(SCRIPT)
+
 else
 BASEPARAMS=-sim
 BASEPARAMS_SIM=$(BASEPARAMS)
