@@ -53,7 +53,8 @@ endif
 
 BSC_FLAGS=-cross-info \
           -parallel-sim-link $(PARALLEL_SIM_LINK) \
-          $(EXTRA_FLAGS)
+		  $(EXTRA_FLAGS) \
+		  $(if $(SHOW_MODULE_USE),-show-module-use)
 
 ifdef VERBOSE
 BSC_FLAGS += -v
@@ -89,6 +90,12 @@ ifdef IGNORE_MODULES
 	EXCLUDED_VIVADO := --exclude  $(addsuffix .v, $(IGNORE_MODULES))
 endif
 
+EXPORT_VERILOG_OUTPUT_DIR ?= export/$(PROJECT_NAME)
+
+ifdef EXPORT_VERILOG_PREFER_VIVADO
+EXPORT_VERILOG_PREFER_VIVADO_FLAG := --prefer_vivado_bsv
+endif
+
 ip_clean:
 	$(RM) -rf $(BUILDDIR)/ip/$(PROJECT_NAME)
 	$(RM) -f $(BUILDDIR)/ip/$(PROJECT_NAME).zip
@@ -102,6 +109,19 @@ endif
 
 compile_top: $(BUILDDIR)/bsc_defines | directories
 	$(SILENTCMD)$(BSV) -elab -verilog $(COMPLETE_FLAGS) $(BSC_FLAGS) -g $(TOP_MODULE) -u $(SRCDIR)/$(MAIN_MODULE).bsv
+
+export_verilog_clean:
+	$(RM) -rf $(BUILDDIR)/$(EXPORT_VERILOG_OUTPUT_DIR)
+
+export_verilog: SHOW_MODULE_USE := 1
+export_verilog: compile_top export_verilog_clean clean
+	$(SILENTCMD)cd $(BUILDDIR); $(BSV_TOOLS_PY) $(PWD) \
+	mkExportVerilog $(PROJECT_NAME) \
+				$(TOP_MODULE) \
+				--verilog_dir $(VERILOGDIR) \
+				$(EXCLUDED_VIVADO) \
+				$(EXPORT_VERILOG_PREFER_VIVADO_FLAG) \
+				--output_dir $(EXPORT_VERILOG_OUTPUT_DIR)
 
 else
 BASEPARAMS=-sim
