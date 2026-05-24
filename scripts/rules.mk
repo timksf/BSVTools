@@ -53,7 +53,8 @@ endif
 
 BSC_FLAGS=-cross-info \
           -parallel-sim-link $(PARALLEL_SIM_LINK) \
-          $(EXTRA_FLAGS)
+		  $(EXTRA_FLAGS) \
+		  $(if $(SHOW_MODULE_USE),-show-module-use)
 
 ifdef VERBOSE
 BSC_FLAGS += -v
@@ -62,8 +63,12 @@ endif
 ifeq ($(SIM_TYPE), VERILOG)
 VERILOGDIR=verilog
 VERILOG_INC?=.
-BASEPARAMS=-verilog -vdir $(BUILDDIR)/$(VERILOGDIR) -vsim $(VERILOG_SIM) 
-BASEPARAMS_SIM=-verilog -vdir $(VERILOGDIR) -vsim $(VERILOG_SIM) -vsearch .:+:$(VERILOG_INC)
+ifdef VERILOG_SIM
+VSIM ?= $(VERILOG_SIM)
+endif
+VSIM ?= modelsim
+BASEPARAMS=-verilog -vdir $(BUILDDIR)/$(VERILOGDIR) -vsim $(VSIM)
+BASEPARAMS_SIM=-verilog -vdir $(VERILOGDIR) -vsim $(VSIM) -vsearch .:+:$(VERILOG_INC)
 COMPILE_FLAGS=-fdir $(PWD) -simdir $(BUILDDIR) -bdir $(BUILDDIR) -info-dir $(BUILDDIR) -p $(LIBRARIES)
 COMPLETE_FLAGS=$(BASEPARAMS) $(COMPILE_FLAGS)
 USED_DIRECTORIES += $(BUILDDIR)/$(VERILOGDIR)
@@ -81,8 +86,18 @@ ifdef CONSTRAINT_FILES
 CONSTRAINT_FILES := --constraints $(CONSTRAINT_FILES)
 endif
 
+ifdef INTERFACE_FILES
+INTERFACE_FILES := --interfaces $(INTERFACE_FILES)
+endif
+
 ifdef IGNORE_MODULES
 	EXCLUDED_VIVADO := --exclude  $(addsuffix .v, $(IGNORE_MODULES))
+endif
+
+EXPORT_VERILOG_OUTPUT_DIR ?= export/$(PROJECT_NAME)
+
+ifdef EXPORT_VERILOG_PREFER_VIVADO
+EXPORT_VERILOG_PREFER_VIVADO_FLAG := --prefer_vivado_bsv
 endif
 
 ip_clean:
@@ -91,7 +106,7 @@ ip_clean:
 
 ip: compile_top ip_clean
 	@echo "Creating IP $(PROJECT_NAME)"
-	$(SILENTCMD)cd $(BUILDDIR); $(BSV_TOOLS_PY) . mkVivado $(PROJECT_NAME) $(TOP_MODULE) --verilog_dir $(VERILOGDIR) $(VERILOGDIR_EXTRAS) $(EXCLUDED_VIVADO) $(VIVADO_ADD_PARAMS) $(VIVADO_INCLUDES) $(CONSTRAINT_FILES)
+	$(SILENTCMD)cd $(BUILDDIR); $(BSV_TOOLS_PY) . mkVivado $(PROJECT_NAME) $(TOP_MODULE) --verilog_dir $(VERILOGDIR) $(VERILOGDIR_EXTRAS) $(EXCLUDED_VIVADO) $(VIVADO_ADD_PARAMS) $(VIVADO_INCLUDES) $(CONSTRAINT_FILES) $(INTERFACE_FILES)
 ifneq (, $(ZIP))
 	$(SILENTCMD)cd $(BUILDDIR)/ip && $(ZIP) -r $(PROJECT_NAME).zip $(PROJECT_NAME)
 endif
@@ -170,6 +185,19 @@ vivado_tcl: compile_top vivado_tcl_clean clean
 				$(CONSTRAINTS) \
 				$(PART) \
 				$(SCRIPT)
+
+export_verilog_clean:
+	$(RM) -rf $(BUILDDIR)/$(EXPORT_VERILOG_OUTPUT_DIR)
+
+export_verilog: SHOW_MODULE_USE := 1
+export_verilog: compile_top export_verilog_clean clean
+	$(SILENTCMD)cd $(BUILDDIR); $(BSV_TOOLS_PY) $(PWD) \
+	mkExportVerilog $(PROJECT_NAME) \
+				$(TOP_MODULE) \
+				--verilog_dir $(VERILOGDIR) \
+				$(EXCLUDED_VIVADO) \
+				$(EXPORT_VERILOG_PREFER_VIVADO_FLAG) \
+				--output_dir $(EXPORT_VERILOG_OUTPUT_DIR)
 
 else
 BASEPARAMS=-sim

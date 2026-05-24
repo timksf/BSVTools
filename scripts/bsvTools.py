@@ -8,6 +8,7 @@ import shutil
 import glob
 import subprocess
 import re
+import json
 from shutil import which
 
 vendor = "esa.informatik.tu-darmstadt.de"
@@ -56,6 +57,34 @@ def copyBSVVerilog(src, dest, exclude="", includevivado=True):
             if not os.path.basename(filename) in exclude:
                 addLicenseHeader(shutil.copyfile(filename, os.path.join(dest, os.path.basename(filename))))
 
+def copyBSVVerilogFromUse(src, use_file, dest, exclude="", prefer_vivado=False):
+    if not os.path.exists(use_file):
+        print(f"Could not find Bluespec module use file: {use_file}")
+        sys.exit(1)
+
+    search_dirs = ['Verilog.Vivado', 'Verilog'] if prefer_vivado else ['Verilog', 'Verilog.Vivado']
+    seen_modules = set()
+
+    with open(use_file, "r") as use_handle:
+        for line in use_handle:
+            module_name = line.strip()
+            if not module_name or module_name in seen_modules:
+                continue
+            seen_modules.add(module_name)
+
+            copied = False
+            for verilog_dir in search_dirs:
+                candidate = os.path.join(src, verilog_dir, f"{module_name}.v")
+                if os.path.exists(candidate):
+                    if not os.path.basename(candidate) in exclude:
+                        addLicenseHeader(shutil.copyfile(candidate, os.path.join(dest, os.path.basename(candidate))))
+                    copied = True
+                    break
+
+            if not copied:
+                print(f"Could not find Bluespec Verilog for used module: {module_name}")
+                sys.exit(1)
+
 
 def addLicenseHeader(file):
     header = """/*
@@ -87,6 +116,27 @@ def copyVerilog(src, dest, exclude):
             for filename in allfiles:
                 if not os.path.basename(filename) in exclude:
                     flattenVerilogIncludes(filename, dest)
+
+def copyVerilogFiles(src, dest, exclude):
+    for path in src:
+        if path.endswith('.v'):
+            if not os.path.basename(path) in exclude:
+                flattenVerilogIncludes(path, dest)
+        else:
+            for filename in glob.glob(os.path.join(path, '*.v')):
+                if not os.path.basename(filename) in exclude:
+                    flattenVerilogIncludes(filename, dest)
+
+def findUseFile(search_paths, top_module):
+    for path in search_paths:
+        if path.endswith('.use') and os.path.exists(path):
+            return path
+
+        candidate = os.path.join(path, f"{top_module}.use")
+        if os.path.exists(candidate):
+            return candidate
+
+    return ""
 
 def wslpath(path):
     """converts the linux path to the corresponding windows path"""
@@ -178,6 +228,34 @@ def processConstraints(s, p):
         additional += "ipx::merge_project_changes files [ipx::current_core]"
     return additional
 
+def processInterfaces(path):
+    ifcs = dict()
+    ifc_cmd = ""
+    with open(path) as ifcs_file:
+        ifcs = json.loads(ifcs_file.read())
+    if not ifcs:
+        print(f"No interface specification found at {path}")
+        return ifc_cmd
+
+    for ifc in ifcs.keys():
+        ifc_name = ifc
+        ifc_abstype = ifcs[ifc]["abstraction_type"]
+        ifc_bustype = ifcs[ifc]["bus_type"]
+        ifc_pins = ifcs[ifc]["pins"]
+        ifc_mode = ifcs[ifc].get("mode", None)
+        ifc_cmd += f"ipx::add_bus_interface {ifc_name} [ipx::current_core]\n"
+        ifc_cmd += f"set_property abstraction_type_vlnv {ifc_abstype} [ipx::get_bus_interfaces {ifc_name} -of_objects [ipx::current_core]]\n"
+        ifc_cmd += f"set_property bus_type_vlnv {ifc_bustype} [ipx::get_bus_interfaces {ifc_name} -of_objects [ipx::current_core]]\n"
+        ifc_cmd += f"set_property display_name {ifc_name} [ipx::get_bus_interfaces {ifc_name} -of_objects [ipx::current_core]]\n"
+        if ifc_mode is not None:
+            ifc_cmd += f"set_property interface_mode {ifc_mode} [ipx::get_bus_interfaces {ifc_name} -of_objects [ipx::current_core]]\n"
+        for pin_map in ifc_pins:
+            pin_name, map_type = next(iter(pin_map.items()))
+            ifc_cmd += f"ipx::add_port_map {map_type} [ipx::get_bus_interfaces {ifc_name} -of_objects [ipx::current_core]]\n"
+            ifc_cmd += f"set_property physical_name {pin_name} [ipx::get_port_maps {map_type} -of_objects [ipx::get_bus_interfaces {ifc_name} -of_objects [ipx::current_core]]]\n"
+
+    return ifc_cmd
+
 
 def mkVivado(cli):
     ippath = "{cwd}/ip/{projectname}".format(projectname=cli.projectname,cwd=os.getcwd())
@@ -218,6 +296,7 @@ def mkVivado(cli):
     additional += '\n'
 
     additional += processConstraints(constraints, constraintpath)
+    additional += processInterfaces(cli.interfaces)
 
     used = executeVivado(createNewProject, cli.vendor, cli.projectname, ippath, tmpdir, cli.topModule, additional, includes)
     used_fullpath = []
@@ -478,7 +557,32 @@ class mkYosys():
 
         print(f"Wrote reports to {reportspath}")
 
-commands = {'mkVivado': mkVivado, 'mkVivadoTCL': mkVivadoTCL, 'mkYosys': mkYosys}
+class mkExportVerilog():
+
+    def __init__(self, cli):
+        export_root = cli.output_dir if cli.output_dir else os.path.join("export", cli.projectname)
+        proj_path = os.path.join(os.getcwd(), export_root)
+        src_path = os.path.join(proj_path, "src")
+
+        if not os.path.exists(src_path):
+            os.makedirs(src_path)
+        else:
+            print(f"{src_path} already exists")
+            return
+
+        use_file = findUseFile(cli.verilog_dir, cli.topModule)
+        if use_file == "":
+            print(f"Could not find {cli.topModule}.use in {cli.verilog_dir}. Re-run compile_top with -show-module-use.")
+            sys.exit(1)
+
+        copyVerilogFiles(cli.verilog_dir, src_path, cli.exclude)
+        if cli.includes:
+            copyVerilogFiles(cli.includes, src_path, cli.exclude)
+        copyBSVVerilogFromUse(cli.bluespec_dir, use_file, src_path, cli.exclude, cli.prefer_vivado_bsv)
+
+        print(f"Exported sources to {proj_path}")
+
+commands = {'mkVivado': mkVivado, 'mkVivadoTCL': mkVivadoTCL, 'mkYosys': mkYosys, 'mkExportVerilog': mkExportVerilog}
 
 def find_bluespec():
     pattern = "Bluespec directory: (.*)"
@@ -507,6 +611,7 @@ def main():
     vivado_ip.add_argument('--additional', nargs='+', default="", type=str)
     vivado_ip.add_argument('--includes', nargs='+', default="", type=str)
     vivado_ip.add_argument('--constraints', nargs='+', default="", type=str)
+    vivado_ip.add_argument('--interfaces', default="", type=str)
 
     # options exclusive to mkYosys command
     yosys_group = parser.add_argument_group("mkYosys", description="Since yosys encompassed a lot of features, here are some dedicated args to customize the flow. See the examples on how to use this command.")
@@ -517,8 +622,12 @@ def main():
     yosys_group.add_argument('--render_convert', help="The generated svg can be converted for easier usability", default="", choices=mkYosys.valid_render_exts, type=str)
 
     vivado_tcl = parser.add_argument_group("mkVivadoTCL", description="")
-    vivado_tcl.add_argument('--part', help="Part number of synthesis target used for project creation", required=True, default="xcku3p-ffvb676-2-e", type=str)
+    vivado_tcl.add_argument('--part', help="Part number of synthesis target used for project creation", default="xcku3p-ffvb676-2-e", type=str)
     vivado_tcl.add_argument('--script', help="Custom TCL script sourced from created project", default="", required=False, type=str)
+
+    export_group = parser.add_argument_group("mkExportVerilog", description="Options for exporting generated Verilog and Bluespec library Verilog sources")
+    export_group.add_argument('--output_dir', default="", type=str)
+    export_group.add_argument('--prefer_vivado_bsv', action='store_true', help="Prefer Bluespec Verilog.Vivado library files when both variants exist")
 
     cli = parser.parse_args()
 
