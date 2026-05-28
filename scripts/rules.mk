@@ -180,8 +180,9 @@ vivado_tcl: compile_top vivado_tcl_clean clean
 	$(SILENTCMD)cd $(BUILDDIR); $(BSV_TOOLS_PY) $(PWD) \
 	mkVivadoTCL $(PROJECT_NAME) \
 				$(TOP_MODULE) \
-				--verilog_dir $(VERILOGDIR) \
+				--verilog_dir $(VERILOGDIR) $(VERILOGDIR_EXTRAS) \
 				$(EXCLUDED_VIVADO) \
+				$(VIVADO_INCLUDES) \
 				$(CONSTRAINTS) \
 				$(PART) \
 				$(SCRIPT)
