@@ -102,8 +102,8 @@ CXX_NO_OPT := 1
 # CONSTRAINT_FILES += "$(CURDIR)/constraints/custom.xdc,LATE"
 
 # Custom TCL flow
-# PART ?= xcku3p-ffvb676-2-e
-# SCRIPT ?= $(CURDIR)/synth.tcl
+# PART := xcku3p-ffvb676-2-e
+# SCRIPT := $(CURDIR)/synth.tcl
 
 # Do not change: Load libraries such as BlueAXI or BlueLib
 ifneq ("$(wildcard $(CURDIR)/libraries/*/*.mk)", "")
