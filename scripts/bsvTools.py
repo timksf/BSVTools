@@ -47,11 +47,14 @@ close_project -delete
 puts "VIVADO FINISHED SUCCESSFULLY"
 """
 
-def copyBSVVerilog(src, dest):
+def copyBSVVerilog(src, dest, exclude="", includevivado=True):
     for filename in glob.glob(os.path.join(src, 'Verilog', '*.v')):
-        addLicenseHeader(shutil.copy(filename, dest))
-    for filename in glob.glob(os.path.join(src, 'Verilog.Vivado', '*.v')):
-        addLicenseHeader(shutil.copy(filename, dest))
+        if not os.path.basename(filename) in exclude:
+            addLicenseHeader(shutil.copyfile(filename, os.path.join(dest, os.path.basename(filename))))
+    if includevivado:
+        for filename in glob.glob(os.path.join(src, 'Verilog.Vivado', '*.v')):
+            if not os.path.basename(filename) in exclude:
+                addLicenseHeader(shutil.copyfile(filename, os.path.join(dest, os.path.basename(filename))))
 
 
 def addLicenseHeader(file):
@@ -229,7 +232,62 @@ def mkVivado(cli):
     used = used_fullpath + usedNGC
     removeUnused(used, srcpath)
 
-commands = {'mkVivado':mkVivado}
+def mkVivadoTCL(cli):
+    create_project = """
+set project_dir {project_dir}
+set project_name {project_name}
+set src_path {src_path}
+# optional variables
+set script_path {{{script_path}}}
+
+puts "Creating project $project_name at path $project_dir"
+create_project -part {part} -force $project_name $project_dir
+
+read_verilog [glob -directory $src_path *.v]
+
+puts "Script path: $script_path"
+if {{[file exists $script_path]}} {{
+    source $script_path
+}}
+
+close_project
+exit 0
+"""
+
+    proj_path = os.path.join(os.getcwd(), cli.projectname)
+    src_path = os.path.join(proj_path, "src")
+
+    if not os.path.exists(src_path):
+        os.makedirs(src_path)
+
+    script_path = ""
+    if os.path.exists(cli.script):
+        script_path = cli.script
+
+    copyVerilog(cli.verilog_dir, src_path, cli.exclude)
+    if cli.includes:
+        copyVerilog(cli.includes, src_path, cli.exclude)
+    copyBSVVerilog(cli.bluespec_dir, src_path, ["main.v"])
+
+    if which("vivado") is None:
+        print("Could not find \"vivado\". Make sure Vivado is in the path.")
+        sys.exit(1)
+
+    with open('temp.tcl', "w+") as f:
+        f.write(create_project.format(
+            project_dir=proj_path,
+            project_name=cli.projectname,
+            src_path=src_path,
+            part=cli.part,
+            script_path=script_path
+        ))
+
+    with subprocess.Popen("vivado -mode batch -source temp.tcl -nojournal -nolog", shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, text=True) as proc:
+        for line in proc.stdout:
+            print(line, end="")
+    os.remove('temp.tcl')
+
+commands = {'mkVivado': mkVivado, 'mkVivadoTCL': mkVivadoTCL}
 
 def find_bluespec():
     pattern = "Bluespec directory: (.*)"
@@ -256,6 +314,10 @@ def main():
     parser.add_argument('--additional', nargs='+', default="", type=str)
     parser.add_argument('--includes', nargs='+', default="", type=str)
     parser.add_argument('--constraints', nargs='+', default="", type=str)
+
+    vivado_tcl = parser.add_argument_group("mkVivadoTCL", description="Options for Vivado TCL project generation")
+    vivado_tcl.add_argument('--part', help="Part number of synthesis target used for project creation", default="xcku3p-ffvb676-2-e", type=str)
+    vivado_tcl.add_argument('--script', help="Custom TCL script sourced from created project", default="", required=False, type=str)
 
     cli = parser.parse_args()
 
