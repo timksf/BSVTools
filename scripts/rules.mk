@@ -169,10 +169,6 @@ ifdef SCRIPT
 SCRIPT:= --script $(SCRIPT)
 endif
 
-ifdef CONSTRAINTS
-CONSTRAINTS:= --constraints $(CONSTRAINTS)
-endif
-
 vivado_tcl_clean:
 	$(RM) -rf $(BUILDDIR)/$(PROJECT_NAME)
 
@@ -183,7 +179,6 @@ vivado_tcl: compile_top vivado_tcl_clean clean
 				--verilog_dir $(VERILOGDIR) $(VERILOGDIR_EXTRAS) \
 				$(EXCLUDED_VIVADO) \
 				$(VIVADO_INCLUDES) \
-				$(CONSTRAINTS) \
 				$(PART) \
 				$(SCRIPT)
 

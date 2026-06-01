@@ -109,6 +109,10 @@ YOSYS_CUSTOM_COMMANDS:=
 RENDER_NETLIST:=
 RENDER_CONVERT:=
 
+# custom TCL flow
+# PART ?= xcku3p-ffvb676-2-e
+# SCRIPT ?= $(CURDIR)/synth.tcl
+
 # Do not change: Load libraries such as BlueAXI or BlueLib
 ifneq ("$(wildcard $(CURDIR)/libraries/*/*.mk)", "")
 include $(CURDIR)/libraries/*/*.mk

@@ -319,16 +319,12 @@ set project_name {project_name}
 set src_path {src_path}
 # optional variables
 set script_path {{{script_path}}}
-set constr_path {{{constr_path}}}
 
 puts "Creating project $project_name at path $project_dir"
 create_project -part {part} -force $project_name $project_dir
 
 read_verilog [glob -directory $src_path *.v]
 
-if {{[file exists $constr_path]}} {{
-    read_xdc $constr_path
-}}
 puts "Script path: $script_path"
 if {{[file exists $script_path]}} {{
     source $script_path
@@ -348,11 +344,6 @@ exit 0
         script_path = ""
         if(os.path.exists(cli.script)):
             script_path = cli.script
-
-        constraints_path = ""
-        constraints = cli.constraints[0] #TODO
-        if(os.path.exists(constraints)):
-            constraints_path = constraints
 
         # add explicitly passed verilog files or if directory passed, all verilog files in dir
         source_files = []
@@ -377,14 +368,13 @@ exit 0
                     project_name=cli.projectname, 
                     src_path=src_path, 
                     part=cli.part, 
-                    constr_path=constraints_path,
                     script_path=script_path
                 )
             )
-        t = subprocess.Popen("vivado" + " -mode batch -source temp.tcl -nojournal -nolog", shell=True, stdout=subprocess.PIPE).stdout.read()
+        with subprocess.Popen("vivado" + " -mode batch -source temp.tcl -nojournal -nolog", shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, text=True) as proc:
+            for line in proc.stdout:
+                print(line, end="")
         os.remove('temp.tcl')
-        s = t.decode()
-        print(s)
 
 class mkYosys():
 
@@ -621,6 +611,7 @@ def main():
     yosys_group.add_argument('--render_netlist', help="The netlist produced by yosys can be rendered to svg by \"netlistsvg\". If the netlist is created by a command in --yosys_commands, the filename can be passed here.", nargs='*', default="", type=str)
     yosys_group.add_argument('--render_convert', help="The generated svg can be converted for easier usability", default="", choices=mkYosys.valid_render_exts, type=str)
 
+    # options exclusive to mkVivadoTCL command
     vivado_tcl = parser.add_argument_group("mkVivadoTCL", description="")
     vivado_tcl.add_argument('--part', help="Part number of synthesis target used for project creation", default="xcku3p-ffvb676-2-e", type=str)
     vivado_tcl.add_argument('--script', help="Custom TCL script sourced from created project", default="", required=False, type=str)
