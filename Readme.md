@@ -102,6 +102,27 @@ Build IP-XACT packet (Needs Vivado in path):
 make SIM_TYPE=VERILOG ip
 ```
 
+Run a custom Vivado Tcl flow on the generated Verilog (Needs Vivado in path), for example:
+
+```sh
+make SIM_TYPE=VERILOG vivado_tcl PART=xcku3p-ffvb676-2-e SCRIPT=$(pwd)/synth.tcl
+```
+
+The `vivado_tcl` target creates a Vivado project in `build/PROJECT_NAME`, copies the generated Verilog sources into
+`build/PROJECT_NAME/src`, and sources the Tcl file given by `SCRIPT`. The sourced script can use the variables
+`project_dir`, `project_name`, `src_path`, and `script_path`.
+
+For example, a small synthesis script could look like this:
+
+```tcl
+read_xdc [file dirname $script_path]/constr.xdc
+synth_design -top mkTop -mode out_of_context
+
+report_timing_summary -file $project_dir/${project_name}_timing.rpt
+report_utilization -file $project_dir/${project_name}_util.rpt
+write_checkpoint -force $project_dir/${project_name}_syn.dcp
+```
+
 _For more examples, please refer to the [Documentation](https://github.com/esa-tu-darmstadt/BSVTools/wiki)_
 
 

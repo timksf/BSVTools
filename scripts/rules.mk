@@ -99,6 +99,27 @@ endif
 compile_top: $(BUILDDIR)/bsc_defines | directories
 	$(SILENTCMD)$(BSV) -elab -verilog $(COMPLETE_FLAGS) $(BSC_FLAGS) -g $(TOP_MODULE) -u $(SRCDIR)/$(MAIN_MODULE).bsv
 
+ifdef PART
+PART:= --part $(PART)
+endif
+
+ifdef SCRIPT
+SCRIPT:= --script $(SCRIPT)
+endif
+
+vivado_tcl_clean:
+	$(RM) -rf $(BUILDDIR)/$(PROJECT_NAME)
+
+vivado_tcl: compile_top vivado_tcl_clean clean
+	$(SILENTCMD)cd $(BUILDDIR); $(BSV_TOOLS_PY) $(PWD) \
+	mkVivadoTCL $(PROJECT_NAME) \
+				$(TOP_MODULE) \
+				--verilog_dir $(VERILOGDIR) $(VERILOGDIR_EXTRAS) \
+				$(EXCLUDED_VIVADO) \
+				$(VIVADO_INCLUDES) \
+				$(PART) \
+				$(SCRIPT)
+
 else
 BASEPARAMS=-sim
 BASEPARAMS_SIM=$(BASEPARAMS)
